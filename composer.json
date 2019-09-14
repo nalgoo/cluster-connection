@@ -1,0 +1,29 @@
+{
+  "name": "nalgoo/cluster-connection",
+  "type": "library",
+  "description": "Galera cluster driver for Doctrine",
+  "keywords": [
+    "doctrine",
+    "driver",
+    "database",
+    "galera"
+  ],
+  "license": "MIT",
+  "authors": [
+    {
+      "name": "Vlado Senasi",
+      "email": "vladimir.senasi@nalgoo.com"
+    }
+  ],
+  "require": {
+    "php": "^7.1",
+    "ext-pdo":"*",
+    "doctrine/dbal": "^2.9",
+    "doctrine/event-manager": "^1.0"
+  },
+  "autoload": {
+    "psr-4": {
+      "Nalgoo\\ClusterConnection\\": "src/"
+    }
+  }
+}
