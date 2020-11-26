@@ -16,6 +16,10 @@ class ClusterConnection extends Connection
 {
 	const MAX_FAILED_ATTEMPTS = 2;
 
+	const SELECTION_MODE_ROUND_ROBIN = 1;
+
+    const SELECTION_MODE_PRIORITY = 2;
+
 	/**
 	 * @var array
 	 */
@@ -35,6 +39,16 @@ class ClusterConnection extends Connection
 	 * @var string|null
 	 */
 	private $selectedNode;
+
+    /**
+     * @var int
+     */
+	private $nodeSelectionMode = self::SELECTION_MODE_ROUND_ROBIN;
+
+    /**
+     * @var int
+     */
+	private $maxFailedAttempts = self::MAX_FAILED_ATTEMPTS;
 
 	public function __construct($params, Driver $driver, ?Configuration $config = null, ?EventManager $eventManager = null)
 	{
@@ -73,7 +87,10 @@ class ClusterConnection extends Connection
 			return '';
 		}, $url);
 
-		$params = array_merge($additionalParams, ['url' => $url, 'wrapperClass' => self::class]);
+		$params = array_merge(
+            ['url' => $url, 'wrapperClass' => self::class, 'driverClass' => ClusterAwarePDOMysqlDriver::class],
+		    $additionalParams
+        );
 
 		/** @var self $connection */
 		$connection = DriverManager::getConnection($params, $config, $eventManager);
@@ -91,65 +108,45 @@ class ClusterConnection extends Connection
 		$this->failedAttempts[$node] = 0;
 	}
 
+	public function setNodeSelectionMode(int $mode)
+    {
+        $this->nodeSelectionMode = $mode;
+    }
+
+    public function setMaxFailedAttempts(int $number)
+    {
+        $this->maxFailedAttempts = $number;
+    }
+
 	private function safeCall($function, $args)
 	{
 		try {
 			return call_user_func_array(['parent', $function], $args);
-
 		} catch (ConnectionException $e) {
-			$this->failedAttempts[$this->selectedNode]++;
-			$this->_conn = null;
-
+			$this->markFailedAttempt();
 			return $this->safeCall($function, $args);
-
 		} catch (ClusterException $e) {
-			$this->failedAttempts[$this->selectedNode]++;
-			$this->_conn = null;
-
+            $this->markFailedAttempt();
 			return $this->safeCall($function, $args);
 		}
 	}
 
-	### overloaded Connection methods
+	private function markFailedAttempt()
+    {
+        $this->failedAttempts[$this->selectedNode]++;
 
-	/**
-	 * @return bool
-	 * @throws \Doctrine\DBAL\ConnectionException
-	 */
-	public function connect()
-	{
-		if ($this->_conn) {
-			return false;
-		}
+        $this->_conn = null;
+        $this->selectedNode = null;
+    }
 
-		$this->selectedNode = $this->selectNode();
-
-		try {
-			$this->_conn = $this->connectTo($this->selectedNode);
-
-		} catch (ConnectionException $e) {
-			$this->failedAttempts[$this->selectedNode]++;
-			$this->_conn = null;
-
-			return $this->connect();
-		}
-
-		if ($this->_eventManager->hasListeners(Events::postConnect)) {
-			$eventArgs = new Event\ConnectionEventArgs($this);
-			$this->_eventManager->dispatchEvent(Events::postConnect, $eventArgs);
-		}
-
-		return true;
-	}
-
-	/**
+    /**
 	 * @return string
 	 * @throws \Doctrine\DBAL\ConnectionException
 	 */
 	private function selectNode(): string
 	{
 		foreach ($this->nodes as $node) {
-			if ($this->failedAttempts[$node] < self::MAX_FAILED_ATTEMPTS) {
+			if ($this->failedAttempts[$node] < $this->maxFailedAttempts) {
 				return $node;
 			}
 		}
@@ -157,7 +154,7 @@ class ClusterConnection extends Connection
 		throw new \Doctrine\DBAL\ConnectionException('No available nodes left to connect to');
 	}
 
-	private function connectTo(string $node)
+    private function connectTo(string $node)
 	{
 		if (!preg_match('/^(.*)(:([0-9]+))?$/', $node, $matches)) {
 			throw new \Doctrine\DBAL\ConnectionException('Cannot parse host name');
@@ -179,72 +176,122 @@ class ClusterConnection extends Connection
 		return $this->_driver->connect($params, $user, $password, $driverOptions);
 	}
 
-	public function getDatabasePlatform()
+    private function queryLocalState()
+    {
+        $statement = $this->query('SHOW GLOBAL STATUS LIKE "wsrep_local_state_comment"');
+
+        $result = $statement->fetchColumn(1);
+
+        if (!$result) {
+            return true; // probably not in cluster at all
+        }
+
+        if ($result !== 'Synced') {
+            throw LocalStateNotSyncedException::withNode($this->selectedNode);
+        }
+    }
+
+    ### overloaded Connection methods
+
+    /**
+     * @return bool
+     * @throws \Doctrine\DBAL\ConnectionException
+     */
+    public function connect()
+    {
+        if ($this->_conn) {
+            return false;
+        }
+
+        $this->selectedNode = $this->selectNode();
+
+        try {
+            $this->_conn = $this->connectTo($this->selectedNode);
+
+            if (count($this->nodes) > 0) {
+                $this->queryLocalState();
+            }
+        } catch (ConnectionException $e) {
+            $this->failedAttempts[$this->selectedNode]++;
+            $this->_conn = null;
+
+            return $this->connect();
+        }
+
+        if ($this->_eventManager->hasListeners(Events::postConnect)) {
+            $eventArgs = new Event\ConnectionEventArgs($this);
+            $this->_eventManager->dispatchEvent(Events::postConnect, $eventArgs);
+        }
+
+        return true;
+    }
+
+    public function getDatabasePlatform()
 	{
 		return $this->safeCall(__FUNCTION__, func_get_args());
 	}
 
-	public function quote($input, $type = null)
+    public function quote($input, $type = null)
 	{
 		return $this->safeCall(__FUNCTION__, func_get_args());
 	}
 
-	public function executeQuery($query, array $params = [], $types = [], ?QueryCacheProfile $qcp = null)
+    public function executeQuery($query, array $params = [], $types = [], ?QueryCacheProfile $qcp = null)
 	{
 		return $this->safeCall(__FUNCTION__, func_get_args());
 	}
 
-	public function query()
+    public function query()
 	{
 		return $this->safeCall(__FUNCTION__, func_get_args());
 	}
 
-	public function executeUpdate($query, array $params = [], array $types = [])
+    public function executeUpdate($query, array $params = [], array $types = [])
 	{
 		return $this->safeCall(__FUNCTION__, func_get_args());
 	}
 
-	public function exec($statement)
+    public function exec($statement)
 	{
 		return $this->safeCall(__FUNCTION__, func_get_args());
 	}
 
-	public function errorCode()
+    public function errorCode()
 	{
 		return $this->safeCall(__FUNCTION__, func_get_args());
 	}
 
-	public function errorInfo()
+    public function errorInfo()
 	{
 		return $this->safeCall(__FUNCTION__, func_get_args());
 	}
 
-	public function lastInsertId($seqName = null)
+    public function lastInsertId($seqName = null)
 	{
 		return $this->safeCall(__FUNCTION__, func_get_args());
 	}
 
-	public function beginTransaction()
+    public function beginTransaction()
 	{
 		return $this->safeCall(__FUNCTION__, func_get_args());
 	}
 
-	public function commit()
+    public function commit()
 	{
 		return $this->safeCall(__FUNCTION__, func_get_args());
 	}
 
-	public function rollBack()
+    public function rollBack()
 	{
 		return $this->safeCall(__FUNCTION__, func_get_args());
 	}
 
-	public function getWrappedConnection()
+    public function getWrappedConnection()
 	{
 		return $this->safeCall(__FUNCTION__, func_get_args());
 	}
 
-	public function ping()
+    public function ping()
 	{
 		return $this->safeCall(__FUNCTION__, func_get_args());
 	}

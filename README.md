@@ -7,7 +7,15 @@ be executed again.
 #### Usage:
 
 ```
-$em = EntityManager::create(['url' => 'mysql://user:pass@node1/db_name', 'wrapperClass' => ClusterConnection::class], $config);
+$em = EntityManager::create(
+    [
+        'url' => 'mysql://user:pass@node1/db_name', 
+        'wrapperClass' => ClusterConnection::class, 
+        'driverClass' => ClusterAwarePDOMysqlDriver::class 
+    ],
+    $config
+);
+
 $em->getConnection()->addNode('node2:3000');
 $em->getConnection()->addNode('node3');
 ```
