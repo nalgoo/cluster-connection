@@ -145,14 +145,47 @@ class ClusterConnection extends Connection
 	 */
 	private function selectNode(): string
 	{
-		foreach ($this->nodes as $node) {
-			if ($this->failedAttempts[$node] < $this->maxFailedAttempts) {
-				return $node;
-			}
-		}
+	    $node = null;
 
-		throw new \Doctrine\DBAL\ConnectionException('No available nodes left to connect to');
+	    switch ($this->nodeSelectionMode) {
+            case self::SELECTION_MODE_ROUND_ROBIN:
+                $node = $this->selectNodeRoundRobin();
+                break;
+            case self::SELECTION_MODE_PRIORITY:
+                $node = $this->selectNodePriority();
+                break;
+        }
+
+        if (!$node) {
+            throw new \Doctrine\DBAL\ConnectionException('No available nodes left to connect to');
+        }
+
+        return $node;
 	}
+
+	private function selectNodePriority(): ?string
+    {
+        foreach ($this->nodes as $node) {
+            if ($this->failedAttempts[$node] < $this->maxFailedAttempts) {
+                return $node;
+            }
+        }
+
+        return null;
+    }
+
+    private function selectNodeRoundRobin(): ?string
+    {
+        for ($failedAttempts = 0; $failedAttempts < $this->maxFailedAttempts; $failedAttempts++) {
+            foreach ($this->nodes as $node) {
+                if ($this->failedAttempts[$node] <= $failedAttempts) {
+                    return $node;
+                }
+            }
+        }
+
+        return null;
+    }
 
     private function connectTo(string $node)
 	{
