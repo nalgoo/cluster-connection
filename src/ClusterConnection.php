@@ -20,37 +20,19 @@ class ClusterConnection extends Connection
 
     const SELECTION_MODE_PRIORITY = 2;
 
-	/**
-	 * @var array
-	 */
-	private $nodes = [];
+	private array $nodes = [];
 
-	/**
-	 * @var array
-	 */
-	private $failedAttempts = [];
+	private array $failedAttempts = [];
 
-	/**
-	 * @var array
-	 */
-	private $params = [];
+	private array $params = [];
 
-	/**
-	 * @var string|null
-	 */
-	private $selectedNode;
+	private ?string $selectedNode;
 
-    /**
-     * @var int
-     */
-	private $nodeSelectionMode = self::SELECTION_MODE_ROUND_ROBIN;
+	private int $nodeSelectionMode = self::SELECTION_MODE_ROUND_ROBIN;
 
-    /**
-     * @var int
-     */
-	private $maxFailedAttempts = self::MAX_FAILED_ATTEMPTS;
+	private int $maxFailedAttempts = self::MAX_FAILED_ATTEMPTS;
 
-	public function __construct($params, Driver $driver, ?Configuration $config = null, ?EventManager $eventManager = null)
+	public function __construct(array $params, Driver $driver, ?Configuration $config = null, ?EventManager $eventManager = null)
 	{
 		if (isset($params['pdo'])) {
 			throw new \InvalidArgumentException('PDO should not be set when using ClusterConnection');
@@ -122,10 +104,10 @@ class ClusterConnection extends Connection
 	{
 		try {
 			return call_user_func_array(['parent', $function], $args);
-		} catch (ConnectionException $e) {
+		} catch (ConnectionException) {
 			$this->markFailedAttempt();
 			return $this->safeCall($function, $args);
-		} catch (ClusterException $e) {
+		} catch (ClusterException) {
             $this->markFailedAttempt();
 			return $this->safeCall($function, $args);
 		}
@@ -140,21 +122,16 @@ class ClusterConnection extends Connection
     }
 
     /**
-	 * @return string
 	 * @throws \Doctrine\DBAL\ConnectionException
 	 */
 	private function selectNode(): string
 	{
 	    $node = null;
 
-	    switch ($this->nodeSelectionMode) {
-            case self::SELECTION_MODE_ROUND_ROBIN:
-                $node = $this->selectNodeRoundRobin();
-                break;
-            case self::SELECTION_MODE_PRIORITY:
-                $node = $this->selectNodePriority();
-                break;
-        }
+        $node = match ($this->nodeSelectionMode) {
+            self::SELECTION_MODE_ROUND_ROBIN => $this->selectNodeRoundRobin(),
+            self::SELECTION_MODE_PRIORITY => $this->selectNodePriority(),
+        };
 
         if (!$node) {
             throw new \Doctrine\DBAL\ConnectionException('No available nodes left to connect to');
@@ -187,8 +164,11 @@ class ClusterConnection extends Connection
         return null;
     }
 
-    private function connectTo(string $node)
-	{
+    /**
+     * @throws \Doctrine\DBAL\ConnectionException
+     */
+    private function connectTo(string $node): Driver\Connection
+    {
 		if (!preg_match('/^(.*)(:([0-9]+))?$/', $node, $matches)) {
 			throw new \Doctrine\DBAL\ConnectionException('Cannot parse host name');
 		}
@@ -209,6 +189,11 @@ class ClusterConnection extends Connection
 		return $this->_driver->connect($params, $user, $password, $driverOptions);
 	}
 
+    /**
+     * @throws LocalStateNotSyncedException
+     * @throws \Doctrine\DBAL\Exception
+     * @TODO return value, return type
+     */
     private function queryLocalState()
     {
         $statement = $this->query('SHOW GLOBAL STATUS LIKE "wsrep_local_state_comment"');
@@ -227,10 +212,11 @@ class ClusterConnection extends Connection
     ### overloaded Connection methods
 
     /**
-     * @return bool
+     * @throws LocalStateNotSyncedException
      * @throws \Doctrine\DBAL\ConnectionException
+     * @throws \Doctrine\DBAL\Exception
      */
-    public function connect()
+    public function connect(): bool
     {
         if ($this->_conn) {
             return false;
@@ -244,7 +230,7 @@ class ClusterConnection extends Connection
             if (count($this->nodes) > 0) {
                 $this->queryLocalState();
             }
-        } catch (ConnectionException $e) {
+        } catch (\Doctrine\DBAL\ConnectionException) {
             $this->failedAttempts[$this->selectedNode]++;
             $this->_conn = null;
 

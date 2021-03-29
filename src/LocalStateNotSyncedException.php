@@ -7,8 +7,8 @@ use Doctrine\DBAL\Driver\DriverException;
 
 class LocalStateNotSyncedException extends AbstractDriverException implements DriverException
 {
-    public static function withNode(string $failedNode)
+    public static function withNode(string $failedNode): static
     {
-        return new self(sprintf('Local state of node %s is not "Synced"', $failedNode));
+        return new static(sprintf('Local state of node %s is not "Synced"', $failedNode));
     }
 }
