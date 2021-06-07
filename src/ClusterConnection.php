@@ -10,7 +10,7 @@ use Doctrine\DBAL\Driver;
 use Doctrine\DBAL\DriverManager;
 use Doctrine\DBAL\Events;
 use Doctrine\DBAL\Event;
-use Doctrine\DBAL\Exception\ConnectionException;
+use Doctrine\DBAL\Exception\DriverException;
 
 class ClusterConnection extends Connection
 {
@@ -122,11 +122,8 @@ class ClusterConnection extends Connection
 	{
 		try {
 			return call_user_func_array(['parent', $function], $args);
-		} catch (ConnectionException $e) {
+		} catch (DriverException $e) {
 			$this->markFailedAttempt();
-			return $this->safeCall($function, $args);
-		} catch (ClusterException $e) {
-            $this->markFailedAttempt();
 			return $this->safeCall($function, $args);
 		}
 	}
@@ -244,7 +241,7 @@ class ClusterConnection extends Connection
             if (count($this->nodes) > 0) {
                 $this->queryLocalState();
             }
-        } catch (ConnectionException $e) {
+        } catch (DriverException $e) {
             $this->failedAttempts[$this->selectedNode]++;
             $this->_conn = null;
 
