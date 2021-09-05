@@ -11,6 +11,14 @@ use Doctrine\DBAL\DriverManager;
 use Doctrine\DBAL\Events;
 use Doctrine\DBAL\Event;
 use Doctrine\DBAL\Exception\DriverException;
+use Doctrine\DBAL\Exception\ForeignKeyConstraintViolationException;
+use Doctrine\DBAL\Exception\InvalidFieldNameException;
+use Doctrine\DBAL\Exception\NonUniqueFieldNameException;
+use Doctrine\DBAL\Exception\NotNullConstraintViolationException;
+use Doctrine\DBAL\Exception\SyntaxErrorException;
+use Doctrine\DBAL\Exception\TableExistsException;
+use Doctrine\DBAL\Exception\TableNotFoundException;
+use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
 
 class ClusterConnection extends Connection
 {
@@ -242,6 +250,20 @@ class ClusterConnection extends Connection
                 $this->queryLocalState();
             }
         } catch (DriverException $e) {
+        	if (
+        		$e instanceof NotNullConstraintViolationException
+		        || $e instanceof SyntaxErrorException
+		        || $e instanceof NonUniqueFieldNameException
+		        || $e instanceof InvalidFieldNameException
+		        || $e instanceof UniqueConstraintViolationException
+		        || $e instanceof ForeignKeyConstraintViolationException
+		        || $e instanceof TableNotFoundException
+		        || $e instanceof TableExistsException
+	        ) {
+        		// some exceptions should stop trying SQL query again
+        		throw $e;
+	        }
+
             $this->failedAttempts[$this->selectedNode]++;
             $this->_conn = null;
 
