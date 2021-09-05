@@ -58,6 +58,11 @@ class ClusterConnection extends Connection
      */
 	private $maxFailedAttempts = self::MAX_FAILED_ATTEMPTS;
 
+	/**
+	 * @var \Throwable|null
+	 */
+	private $lastError;
+
 	public function __construct($params, Driver $driver, ?Configuration $config = null, ?EventManager $eventManager = null)
 	{
 		if (isset($params['pdo'])) {
@@ -162,7 +167,11 @@ class ClusterConnection extends Connection
         }
 
         if (!$node) {
-            throw new \Doctrine\DBAL\ConnectionException('No available nodes left to connect to');
+        	$message = 'No available nodes left to connect to.';
+        	if ($this->lastError) {
+        		$message .= ' Last error: ' . $this->lastError->getMessage();
+	        }
+            throw new \Doctrine\DBAL\ConnectionException($message);
         }
 
         return $node;
