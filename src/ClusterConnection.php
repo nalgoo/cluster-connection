@@ -136,7 +136,7 @@ class ClusterConnection extends Connection
 		try {
 			return call_user_func_array(['parent', $function], $args);
 		} catch (DriverException $e) {
-			$this->markFailedAttempt();
+			$this->processException($e);
 			return $this->safeCall($function, $args);
 		}
 	}
@@ -238,6 +238,26 @@ class ClusterConnection extends Connection
         }
     }
 
+    private function processException(DriverException $e)
+    {
+	    if (
+		    $e instanceof NotNullConstraintViolationException
+		    || $e instanceof SyntaxErrorException
+		    || $e instanceof NonUniqueFieldNameException
+		    || $e instanceof InvalidFieldNameException
+		    || $e instanceof UniqueConstraintViolationException
+		    || $e instanceof ForeignKeyConstraintViolationException
+		    || $e instanceof TableNotFoundException
+		    || $e instanceof TableExistsException
+	    ) {
+		    // some exceptions should stop trying SQL query again
+		    throw $e;
+	    }
+
+	    $this->lastError = $e;
+	    $this->markFailedAttempt();
+    }
+
     ### overloaded Connection methods
 
     /**
@@ -259,24 +279,8 @@ class ClusterConnection extends Connection
                 $this->queryLocalState();
             }
         } catch (DriverException $e) {
-        	if (
-        		$e instanceof NotNullConstraintViolationException
-		        || $e instanceof SyntaxErrorException
-		        || $e instanceof NonUniqueFieldNameException
-		        || $e instanceof InvalidFieldNameException
-		        || $e instanceof UniqueConstraintViolationException
-		        || $e instanceof ForeignKeyConstraintViolationException
-		        || $e instanceof TableNotFoundException
-		        || $e instanceof TableExistsException
-	        ) {
-        		// some exceptions should stop trying SQL query again
-        		throw $e;
-	        }
-
-            $this->failedAttempts[$this->selectedNode]++;
-            $this->_conn = null;
-
-            return $this->connect();
+        	$this->processException($e);
+        	return $this->connect();
         }
 
         if ($this->_eventManager->hasListeners(Events::postConnect)) {
