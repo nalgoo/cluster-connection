@@ -134,7 +134,7 @@ class ClusterConnection extends Connection
 	private function safeCall($function, $args)
 	{
 		try {
-			return call_user_func_array(['parent', $function], $args);
+			return call_user_func_array([parent::class, $function], $args);
 		} catch (DriverException $e) {
 			$this->processException($e);
 			return $this->safeCall($function, $args);
